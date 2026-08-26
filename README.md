@@ -1,4 +1,4 @@
-# anecdote-wiki
+# daily-fact
 
 Poste chaque matin une anecdote de la rubrique « Le saviez-vous ? » de Wikipédia
 dans un salon Discord.
