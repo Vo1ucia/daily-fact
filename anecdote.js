@@ -9,12 +9,23 @@ const UA = 'AnecdoteDiscordBot/1.0 (https://github.com/Vo1ucia/daily-fact)';
 
 // --- Récupération -------------------------------------------------------
 async function fetchAnecdotes() {
-  const url =
-    'https://fr.wikipedia.org/w/api.php?action=parse' +
-    `&page=${encodeURIComponent(PAGE)}` +
-    '&prop=text&format=json&formatversion=2&redirects=1';
+  // On demande le rendu de la TRANSCLUSION `{{Modèle:AccueilInsolites}}`, pas de
+  // la page elle-même : c'est ce que voit un lecteur sur l'accueil. Les blocs
+  // <noinclude> (notice d'édition, consignes aux contributeurs) sont ainsi exclus.
+  const params = new URLSearchParams({
+    action: 'parse',
+    text: `{{${PAGE}}}`,
+    title: 'Wikipédia:Accueil principal',
+    contentmodel: 'wikitext',
+    prop: 'text',
+    disablelimitreport: '1',
+    format: 'json',
+    formatversion: '2'
+  });
 
-  const res = await fetch(url, { headers: { 'User-Agent': UA } });
+  const res = await fetch(`https://fr.wikipedia.org/w/api.php?${params}`, {
+    headers: { 'User-Agent': UA }
+  });
   if (!res.ok) throw new Error(`Wikipédia a répondu ${res.status}`);
 
   const data = await res.json();
@@ -57,9 +68,29 @@ export function extraireAnecdotes(html) {
         image: image ? image.replace(/^\/\//, 'https://') : null
       };
     })
-    // on écarte les liens de navigation et les lignes trop courtes
-    .filter(a => a.brut.length > 40 && !/^(archives|proposer|discussion)\b/i.test(a.brut))
+    // on écarte les liens de navigation, les consignes et les lignes trop courtes
+    .filter(
+      a =>
+        a.brut.length > 40 &&
+        !/^(archives|proposer|discussion)\b/i.test(a.brut) &&
+        !estConsigne(a.brut)
+    )
     .map(({ markdown, image }) => ({ texte: markdown, image }));
+}
+
+// La page contient une notice d'édition destinée aux contributeurs.
+// Ces tournures n'apparaissent jamais dans une anecdote.
+const CONSIGNES = [
+  /mettre en commentaire/i,
+  /\bexemple\s*:/i,
+  /<!--/,
+  /\bne pas modifier\b/i,
+  /\bcliquez? (sur|ici)\b/i,
+  /\bmodifier cette page\b/i
+];
+
+function estConsigne(texte) {
+  return CONSIGNES.some(motif => motif.test(texte));
 }
 
 // Les pages hors espace principal ne sont pas des articles
