@@ -25,30 +25,49 @@ async function fetchAnecdotes() {
 
 // --- Nettoyage du HTML --------------------------------------------------
 export function extraireAnecdotes(html) {
-  const items = [...html.matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/gi)]
-    .map(m => m[1])
-    .map(item =>
-      item
-        .replace(/<sup\b[\s\S]*?<\/sup>/gi, '') // appels de note
-        .replace(/<style\b[\s\S]*?<\/style>/gi, '')
-    );
+  const items = [...html.matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/gi)].map(m => m[1]);
 
   return items
-    .map(item => ({
-      // version affichée : liens transformés en Markdown cliquable
-      markdown: nettoyer(
-        item.replace(
-          /<a\b[^>]*href="\/wiki\/([^"#?]+)"[^>]*>([\s\S]*?)<\/a>/gi,
-          (_, cible, texte) =>
-            `[${nettoyer(texte)}](https://fr.wikipedia.org/wiki/${echapperUrl(cible)})`
-        )
-      ),
-      // version nue : sert uniquement à décider si on garde la ligne
-      brut: nettoyer(item)
-    }))
+    .map(item => {
+      // On met l'illustration de côté avant de la retirer du texte
+      const image = (item.match(/<img\b[^>]*\bsrc="([^"]+)"/i) || [])[1];
+
+      const sansImage = item
+        .replace(/<sup\b[\s\S]*?<\/sup>/gi, '') // appels de note
+        .replace(/<style\b[\s\S]*?<\/style>/gi, '')
+        .replace(/<figcaption\b[\s\S]*?<\/figcaption>/gi, '') // légende (mise en page actuelle)
+        .replace(/<div\b[^>]*class="[^"]*thumbcaption[^"]*"[\s\S]*?<\/div>/gi, '') // légende (ancienne)
+        .replace(/<img\b[^>]*>/gi, '');
+
+      return {
+        // version affichée : liens transformés en Markdown cliquable
+        markdown: nettoyer(
+          sansImage
+            .replace(
+              /<a\b[^>]*href="\/wiki\/([^"#?]+)"[^>]*>([\s\S]*?)<\/a>/gi,
+              (_, cible, texte) =>
+                estArticle(cible)
+                  ? `[${nettoyer(texte)}](https://fr.wikipedia.org/wiki/${echapperUrl(cible)})`
+                  : nettoyer(texte) // Fichier:, Catégorie:… : on garde le texte, pas le lien
+            )
+            .replace(/\[\]\([^)]*\)/g, '') // liens Markdown devenus vides
+        ),
+        // version nue : sert uniquement à décider si on garde la ligne
+        brut: nettoyer(sansImage),
+        image: image ? image.replace(/^\/\//, 'https://') : null
+      };
+    })
     // on écarte les liens de navigation et les lignes trop courtes
     .filter(a => a.brut.length > 40 && !/^(archives|proposer|discussion)\b/i.test(a.brut))
-    .map(a => a.markdown);
+    .map(({ markdown, image }) => ({ texte: markdown, image }));
+}
+
+// Les pages hors espace principal ne sont pas des articles
+const NAMESPACES =
+  /^(Fichier|File|Image|Cat[ée]gorie|Category|Sp[ée]cial|Special|Aide|Help|Portail|Portal|Wikip[ée]dia|Wikipedia|Mod[èe]le|Template|Discussion)\s*:/i;
+
+function estArticle(cible) {
+  return !NAMESPACES.test(decodeURIComponent(cible));
 }
 
 // Discord coupe un lien Markdown à la première parenthèse fermante
@@ -89,18 +108,20 @@ async function loadVues() {
 }
 
 // --- Envoi Discord ------------------------------------------------------
-async function poster(texte) {
+async function poster({ texte, image }) {
+  const embed = {
+    color: 0x5865f2,
+    title: '💡 Le saviez-vous ?',
+    description: texte,
+    footer: { text: 'Wikipédia en français · CC BY-SA' },
+    timestamp: new Date().toISOString()
+  };
+
+  if (image) embed.thumbnail = { url: image };
+
   const body = {
     username: 'Le saviez-vous ?',
-    embeds: [
-      {
-        color: 0x5865f2,
-        title: '💡 Le saviez-vous ?',
-        description: texte,
-        footer: { text: 'Wikipédia en français · CC BY-SA' },
-        timestamp: new Date().toISOString()
-      }
-    ]
+    embeds: [embed]
   };
 
   const res = await fetch(WEBHOOK, {
@@ -124,7 +145,7 @@ if (!process.env.VITEST) {
   }
 
   const vues = await loadVues();
-  const nouvelles = anecdotes.filter(a => !vues.includes(a));
+  const nouvelles = anecdotes.filter(a => !vues.includes(a.texte));
 
   // Les anecdotes restent ~3 jours sur l'accueil : s'il n'y a rien de neuf,
   // on ne poste rien plutôt que de radoter.
@@ -137,6 +158,6 @@ if (!process.env.VITEST) {
   await poster(choisie);
 
   // On ne garde que les 200 dernières pour éviter que le fichier n'enfle
-  await writeFile(VUES_FILE, JSON.stringify([...vues, choisie].slice(-200), null, 2));
-  console.log('Anecdote publiée :', choisie);
+  await writeFile(VUES_FILE, JSON.stringify([...vues, choisie.texte].slice(-200), null, 2));
+  console.log('Anecdote publiée :', choisie.texte);
 }
