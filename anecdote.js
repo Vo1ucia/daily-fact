@@ -5,7 +5,7 @@ const PAGE = 'Modèle:AccueilInsolites';
 const VUES_FILE = 'deja-vues.json';
 
 // Wikimedia demande un User-Agent identifiable sur tout accès API
-const UA = 'AnecdoteDiscordBot/1.0 (https://github.com/TON_PSEUDO/TON_REPO)';
+const UA = 'AnecdoteDiscordBot/1.0 (https://github.com/Vo1ucia/daily-fact)';
 
 // --- Récupération -------------------------------------------------------
 async function fetchAnecdotes() {
